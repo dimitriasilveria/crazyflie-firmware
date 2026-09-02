@@ -97,9 +97,18 @@ static void socketlinkTask(void *param)
       recvlen = recvfrom(fd, p.raw, sizeof(p.raw), 0, (struct sockaddr *)&remaddr, &addrlen);
       if (recvlen > 0){
         p.size = recvlen - 1; // We remove the header size
-        // CRTP control packets must not be dropped. Back-pressure here is
-        // preferable to losing the request that establishes the cflib link.
-        xQueueSend(crtpPacketDelivery, &p, portMAX_DELAY);
+        // Do not block the socket task behind high-rate simulator traffic;
+        // that can starve the sensor loop and trip the stabilizer watchdog.
+        // Sensor/localization samples are redundant, but a one-shot cflib
+        // request is not. If the queue is full, replace its oldest packet
+        // with the control request at the front of the queue.
+        if (xQueueSend(crtpPacketDelivery, &p, 0) != pdTRUE &&
+            p.port != CRTP_PORT_SETPOINT_SIM &&
+            p.port != CRTP_PORT_LOCALIZATION) {
+          CRTPPacket discarded;
+          xQueueReceive(crtpPacketDelivery, &discarded, 0);
+          xQueueSendToFront(crtpPacketDelivery, &p, 0);
+        }
       } else {
         DEBUG_PRINT("error : %s \n" , strerror(errno));
       }
