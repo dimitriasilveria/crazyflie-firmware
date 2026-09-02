@@ -169,7 +169,10 @@ void sensorsSimAcquire(sensorData_t *sensors)
 }
 
 bool sensorsSimAreCalibrated() {
-  return gyroBiasFound;
+  // MuJoCo already provides calibrated IMU measurements. Waiting for the
+  // hardware-style gyro bias estimator can deadlock the SITL stabilizer and
+  // prevents firmware log blocks (including pose) from producing data.
+  return true;
 }
 
 static void sensorsTask(void *param)
