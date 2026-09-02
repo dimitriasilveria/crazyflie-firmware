@@ -81,6 +81,10 @@ config PLATFORM_FLAPPER
     select SENSORS_BMI088_BMP3XX
     select SENSORS_BMI088_SPI
 
+config PLATFORM_SITL
+    bool "Build for SITL"
+    select SENSORS_SITL
+
 endchoice
 
 config ENABLE_THRUST_BAT_COMPENSATED
@@ -190,6 +194,12 @@ config SENSORS_BMI088_BMP3XX
 config SENSORS_BOSCH
     bool "Include Bosch sensors"
     default n
+
+config SENSORS_SITL
+bool "Support for SITL sensors"
+default n
+help
+    Include support for SITL sensors
 
 config SENSORS_IGNORE_BAROMETER_FAIL
     bool "Ignore failure from barometer"

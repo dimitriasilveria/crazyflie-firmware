@@ -241,6 +241,7 @@ static void kalmanTask(void* parameters) {
   #endif
 
     // Run the system dynamics to predict the state forward.
+    // if (accSubSampler.count > 0 && gyroSubSampler.count > 0) {
     if (nowMs >= nextPredictionMs) {
       axis3fSubSamplerFinalize(&accSubSampler);
       axis3fSubSamplerFinalize(&gyroSubSampler);
@@ -251,7 +252,7 @@ static void kalmanTask(void* parameters) {
       STATS_CNT_RATE_EVENT(&predictionCounter);
 
       if (!rateSupervisorValidate(&rateSupervisorContext, nowMs)) {
-        DEBUG_PRINT("WARNING: Kalman prediction rate off (%lu)\n", rateSupervisorLatestCount(&rateSupervisorContext));
+        DEBUG_PRINT("WARNING: Kalman prediction rate off (%lu)\n", (unsigned long)rateSupervisorLatestCount(&rateSupervisorContext));
       }
     }
 
@@ -369,7 +370,7 @@ static void updateQueuedMeasurements(const uint32_t nowMs, const bool quadIsFlyi
 // Called when this estimator is activated
 void estimatorKalmanInit(void)
 {
-  #ifdef CONFIG_DECK_LOCO_2D_POSITION
+  #if defined(CONFIG_DECK_LOCO_2D_POSITION) || defined(CONFIG_PLATFORM_SITL)
   coreParams.attitudeReversion = 0.0f;
   #else
   if (deckGetRequiredKalmanEstimatorAttitudeReversionOff())

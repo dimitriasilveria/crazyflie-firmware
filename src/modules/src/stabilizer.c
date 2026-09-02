@@ -29,13 +29,16 @@
 
 #include "FreeRTOS.h"
 #include "task.h"
+#include "semphr.h"
 
 #include "system.h"
 #include "log.h"
 #include "param.h"
 #include "debug.h"
+#ifndef CONFIG_PLATFORM_SITL
 #include "motors.h"
 #include "pm.h"
+#endif
 #include "platform.h"
 
 #include "stabilizer.h"
@@ -51,7 +54,7 @@
 #include "supervisor.h"
 
 #include "estimator.h"
-#include "usddeck.h"
+//#include "usddeck.h"
 #include "quatcompress.h"
 #include "statsCnt.h"
 #include "static_mem.h"
@@ -181,8 +184,10 @@ void stabilizerInit(StateEstimatorType estimator)
   stateEstimatorInit(estimator);
   controllerInit(ControllerTypeAutoSelect);
   powerDistributionInit();
+  #ifndef CONFIG_PLATFORM_SITL
   motorsInit(platformConfigGetMotorMapping());
   collisionAvoidanceInit();
+  #endif
   estimatorType = stateEstimatorGetType();
   controllerType = controllerGetType();
 
@@ -199,14 +204,16 @@ bool stabilizerTest(void)
   pass &= stateEstimatorTest();
   pass &= controllerTest();
   pass &= powerDistributionTest();
+  #ifndef CONFIG_PLATFORM_SITL
   pass &= motorsTest();
   pass &= collisionAvoidanceTest();
-
+  #endif
   return pass;
 }
 
 static void batteryCompensation(const motors_thrust_uncapped_t* motorThrustUncapped, motors_thrust_uncapped_t* motorThrustBatCompUncapped)
 {
+  #ifndef CONFIG_PLATFORM_SITL
   // Low pass on the BatteryVoltage
   float b = 0.01f; // 0.2f = Convergence (95%) in ~10 steps = ~20ms
   static float supplyVoltage = 4.2;
@@ -216,14 +223,18 @@ static void batteryCompensation(const motors_thrust_uncapped_t* motorThrustUncap
   {
     motorThrustBatCompUncapped->list[motor] = motorsCompensateBatteryVoltage(motor, motorThrustUncapped->list[motor], supplyVoltage);
   }
+  #endif
 }
-
 static void setMotorRatios(const motors_thrust_pwm_t* motorPwm)
 {
+  #ifndef CONFIG_PLATFORM_SITL
   motorsSetRatio(MOTOR_M1, motorPwm->motors.m1);
   motorsSetRatio(MOTOR_M2, motorPwm->motors.m2);
   motorsSetRatio(MOTOR_M3, motorPwm->motors.m3);
   motorsSetRatio(MOTOR_M4, motorPwm->motors.m4);
+  #else
+  motorsSetRatio(motorPwm);
+  #endif
 }
 
 static void updateStateEstimatorAndControllerTypes() {
@@ -254,8 +265,12 @@ static void logCapWarning(const bool isCapped) {
 
 static void controlMotors(const control_t* control) {
   powerDistribution(control, &motorThrustUncapped);
+  #ifndef CONFIG_PLATFORM_SITL
   batteryCompensation(&motorThrustUncapped, &motorThrustBatCompUncapped);
   const bool isCapped = powerDistributionCap(&motorThrustBatCompUncapped, &motorPwm);
+  #else
+  const bool isCapped = powerDistributionCap(&motorThrustUncapped, &motorPwm);
+  #endif
   logCapWarning(isCapped);
   setMotorRatios(&motorPwm);
 }
@@ -289,7 +304,7 @@ void rateSupervisorTask(void *pvParameters) {
 static void stabilizerTask(void* param)
 {
   stabilizerStep_t stabilizerStep;
-  uint32_t lastWakeTime;
+  TickType_t lastWakeTime;
   vTaskSetApplicationTaskTag(0, (void*)TASK_STABILIZER_ID_NBR);
 
   //Wait for the system to be fully started to start stabilization loop
@@ -318,15 +333,17 @@ static void stabilizerTask(void* param)
     // update sensorData struct (for logging variables)
     sensorsAcquire(&sensorData);
 
+    //TODO: Add health checking to SITL
+    #ifndef CONFIG_PLATFORM_SITL
     if (healthShallWeRunTest()) {
       healthRunTests(&sensorData);
     } else {
+    #endif
       updateStateEstimatorAndControllerTypes();
 
       stateEstimator(&state, stabilizerStep);
 
       const bool areMotorsAllowedToRun = supervisorAreMotorsAllowedToRun();
-
       // Critical for safety, be careful if you modify this code!
       crtpCommanderBlock(! areMotorsAllowedToRun);
 
@@ -339,21 +356,27 @@ static void stabilizerTask(void* param)
       // Let the supervisor update it's view of the current situation
       supervisorUpdate(&sensorData, &setpoint, stabilizerStep);
 
+      // TODO: Add collision avoidance to SITL
+      #ifndef CONFIG_PLATFORM_SITL
       // Let the collision avoidance module modify the setpoint, if needed
       collisionAvoidanceUpdateSetpoint(&setpoint, &sensorData, &state, stabilizerStep);
-
+      #endif
       // Critical for safety, be careful if you modify this code!
       // Let the supervisor modify the setpoint to handle exceptional conditions
       supervisorOverrideSetpoint(&setpoint);
 
       controller(&control, &setpoint, &sensorData, &state, stabilizerStep);
-
+      // DEBUG_PRINT("setpoint | x: %f y: %f z: %f roll: %f pitch %f yaw %f \n",
+      //   setpoint.position.x, setpoint.position.y, setpoint.position.z,
+      //   setpoint.attitude.roll, setpoint.attitude.pitch, setpoint.attitude.yaw);
       // Critical for safety, be careful if you modify this code!
       // The supervisor will already set thrust to 0 in the setpoint if needed, but to be extra sure prevent motors from running.
       if (areMotorsAllowedToRun) {
         controlMotors(&control);
       } else {
+        #ifndef CONFIG_PLATFORM_SITL
         motorsStop();
+        #endif
       }
 
       // Compute compressed log formats
@@ -371,10 +394,11 @@ static void stabilizerTask(void* param)
       calcSensorToOutputLatency(&sensorData);
       stabilizerStep++;
       STATS_CNT_RATE_EVENT(&stabilizerRate);
+    #ifndef CONFIG_PLATFORM_SITL
     }
+    #endif
 
     xSemaphoreGive(xRateSupervisorSemaphore);
-
 #ifdef CONFIG_MOTORS_ESC_PROTOCOL_DSHOT
     motorsBurstDshot();
 #endif
@@ -840,7 +864,6 @@ LOG_ADD(LOG_INT16, ratePitch, &stateCompressed.ratePitch)
  */
 LOG_ADD(LOG_INT16, rateYaw, &stateCompressed.rateYaw)
 LOG_GROUP_STOP(stateEstimateZ)
-
 
 LOG_GROUP_START(motor)
 

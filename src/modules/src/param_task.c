@@ -60,7 +60,9 @@ void paramInit(void)
   }
 
   paramLogicInit();
+  #ifndef CONFIG_PLATFORM_SITL
   paramLogicStorageInit();
+  #endif
 
   //Start the param task
   STATIC_MEM_TASK_CREATE(paramTask, paramTask, PARAM_TASK_NAME, NULL, PARAM_TASK_PRI);
